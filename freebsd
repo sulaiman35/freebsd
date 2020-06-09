@@ -1,0 +1,250 @@
+## Macros
+ext_if="em0"
+int_if="em1"
+trst_if="em2"
+
+localnet = $int_if:network
+trustnet = $trst_if:network
+internet = $ext_if:network
+ext_tcp_ports="{ ssh }"
+
+# NATed ports
+nat_tcp_ports="{ smtp, 587, 50, domain, ntp, ssh, 25, http, https, 500, 5509, 7800,7801, 7802, >= 1024 }"
+nat_udp_ports="{ 50, domain, ntp, 500, 25, 5509, 4500, >= 1024 }"
+
+# VPN
+vpn_ports="{50, 500, 4500}"
+vpn_clients="{124.29.202.3, 125.209.68.122, 202.141.248.30, 13.93.9.47, 202.141.255.237, 61.5.156.66, 202.141.255.210, 117.20.22.110, 58.27.253.252 }"
+vpn_banks="{125.209.68.122, 202.141.248.30, 202.141.255.237, 202.141.255.210, 117.20.22.110, 13.93.9.47, 58.27.253.252 }"
+vpn_tech="{110.93.218.34, 202.163.109.146, 61.5.156.66 }"
+jenkins="{18.141.36.103, 175.107.202.144}"
+white_list="{124.29.202.3, 61.5.131.242, 13.95.23.184, 182.176.15.85, 175.107.202.144, 202.147.186.188, 202.147.186.189, 202.147.186.190, 39.50.237.4}"
+RC_IP = "124.29.202.3"
+fms_ip="{61.5.156.210, 202.163.115.82, 61.5.135.197, 61.5.131.242, 202.147.186.189, 61.5.156.211, 61.5.156.212, 202.163.115.82}"
+
+tcp_ports="{ 22, 25, 514, 5509, 587 >= 1024 }"
+udp_ports="{ domain, ntp, 514, 25, 500, 5509 }"
+trustnet_ports="{ 22, 25, 53, 80, 27017 }"
+high_ports="{ http, https, >=1024 }"
+# States.
+mod_state="flags S/UAPRSF modulate state"
+syn_state="flags S/UAPRSF synproxy state"
+tcp_state="flags S/UAPRSF modulate state"
+udp_state="keep state"
+
+# Stateful Tracking Options.
+# To clear <blocked_hosts> add to root's crontab:
+# * * * * * /sbin/pfctl -t blocked_hosts -T expire 600 > /dev/null 2>&1
+# This will block bad hosts for 10-11 minutes
+sto_ext_web="(source-track rule, max-src-conn-rate 40/100, overload <blocked_hosts> )"
+sto_ext_ssh="(max 10, source-track rule, max-src-nodes 5, max-src-conn-rate  10/60, overload <blocked_hosts> flush global)"
+sto_nat_ports="(max-src-conn-rate 100/1)"
+
+# Tables
+#
+
+# create or touch /etc/pf.abusers
+table <fail2ban> persist
+#table <abusers> persist file "/etc/pf.abusers"
+table <ossec_fwtable> persist
+table <allowed_url> persist file "/etc/pf.allowed_url"
+table <allowed_url2> persist file "/etc/pf.allowed_url"
+table <slack_allowed_url1> persist file "/etc/pf.slack_allowed_url"
+table <slack_allowed_url2> persist file "/etc/pf.slack_allowed_url"
+# http://en.wikipedia.org/wiki/Reserved_IP_addresses
+table <blocked_nets> { 0.0.0.0/8, \
+                       169.254.0.0/16, \
+                       172.16.0.0/12, \
+                       192.0.2.0/24, \
+                       192.88.99.0/24, \
+                       192.168.0.0/16, \
+                       198.18.0.0/15, \
+                       198.51.100.0/24, \
+                       203.0.113.0/24, \
+                       224.0.0.0/4, \
+                       240.0.0.0/4 }
+
+
+# Options
+set block-policy drop
+set debug urgent
+#Remove this line if connections are dropping
+set limit { frags 10000, states 30000 }
+set loginterface $ext_if
+set optimization normal
+set ruleset-optimization none
+set skip on lo
+set state-policy if-bound
+
+
+# Traffic normalization
+scrub in all  min-ttl 100 max-mss 1440 fragment reassemble
+
+
+# Translation
+rdr on $ext_if proto tcp from any to ($ext_if) port 22 -> 127.0.0.1   port 22
+rdr pass on $ext_if proto tcp from any to ($ext_if) port 5600 -> 10.0.10.14  port 22
+#rdr pass on $ext_if proto tcp from any to ($ext_if) port 5601 -> 10.0.10.122 port 22
+rdr pass on $ext_if proto tcp from $white_list to ($ext_if) port 2211 -> 10.0.10.131 port 22
+rdr pass on $ext_if proto tcp from $jenkins        to ($ext_if) port 2311 -> 10.0.10.23  port 22
+rdr pass on $ext_if proto tcp from $jenkins        to ($ext_if) port 2312 -> 10.0.10.126 port 22
+rdr pass on $ext_if proto tcp from $jenkins        to ($ext_if) port 2313 -> 10.0.10.178 port 22
+rdr pass on $ext_if proto tcp from $jenkins        to ($ext_if) port 2314 -> 10.0.10.125 port 22
+rdr pass on $ext_if proto tcp from $jenkins        to ($ext_if) port 2315 -> 10.0.10.122 port 22
+rdr pass on $ext_if proto tcp from any to ($ext_if) port 5509 -> 10.0.10.12  port 5509
+rdr pass on $ext_if proto tcp from $fms_ip to ($ext_if) port 2830 -> 10.0.10.240 port 3389
+rdr pass on $ext_if proto tcp from $fms_ip to ($ext_if) port 2831 -> 10.0.10.240 port 1433
+#rdr pass on $ext_if proto tcp from $white_list to ($ext_if) port 3389  -> 10.0.10.240 port 3389
+
+rdr on $ext_if proto tcp from any to ($ext_if) port 443 -> 10.0.10.41 port 443
+rdr on $ext_if proto tcp from any to ($ext_if) port  80 -> 10.0.10.41 port 80
+
+rdr pass on $ext_if proto tcp from any        to ($ext_if) port 8084 -> 10.0.10.129 port 8080
+rdr pass on $ext_if proto tcp from any        to ($ext_if) port 9093 -> 10.0.10.129 port 9000
+rdr pass on $ext_if proto tcp from any        to ($ext_if) port 9094 -> 10.0.10.129 port 7070
+rdr pass on $ext_if proto tcp from any        to ($ext_if) port 9095 -> 10.0.10.129 port 3000
+
+# Adding redirection rule for Auto-Test machine
+rdr pass on $ext_if proto tcp from any to ($ext_if) port 6604 -> 10.0.10.162  port 22
+rdr pass on $ext_if proto tcp from any to ($ext_if) port 6605  -> 10.0.10.241 port 22
+
+nat pass on $ext_if from 10.0.10.126 to  124.29.202.3 -> 10.0.30.11
+#nat pass on $ext_if from 10.0.10.122 to  10.0.30.103 -> 10.0.30.10
+nat pass on $ext_if from ($trustnet) to any -> 10.0.30.10
+nat pass on $ext_if from ($localnet) to any -> ($ext_if)
+
+#nat pass on $ext_if from 10.0.10.23  to  10.0.30.104 -> 10.0.30.11
+#nat pass on $ext_if from 10.0.10.23  to  10.0.30.103 -> 10.0.30.10
+#nat on external interface  from 10.0.10.x to 1 link ip  -> 2nd private ip
+
+
+### VPN Banks Connectivity
+rdr pass on $ext_if proto {tcp, udp} from $vpn_banks  to ($ext_if) port 50 -> 10.0.10.137 port 50
+rdr pass on $ext_if proto {tcp, udp} from $vpn_banks  to ($ext_if) port 450 -> 10.0.10.137 port 450
+rdr pass on $ext_if proto {tcp, udp} from $vpn_banks  to ($ext_if) port 4500  -> 10.0.10.137 port 4500
+
+### VPN Tech Partners Connectivity
+rdr pass on $ext_if proto {tcp, udp} from $vpn_tech  to ($ext_if) port 50 -> 10.0.10.136 port 50
+rdr pass on $ext_if proto {tcp, udp} from $vpn_tech  to ($ext_if) port 450  -> 10.0.10.136 port 450
+rdr pass on $ext_if proto {tcp, udp} from $vpn_tech  to ($ext_if) port 4500 -> 10.0.10.136 port 4500
+
+### Mock Bank
+rdr pass on $ext_if proto tcp from any to ($ext_if) port 9000  -> 10.0.10.23  port 9000
+rdr pass on $ext_if proto tcp from any to ($ext_if) port 9001  -> 10.0.10.122 port 9001
+rdr pass on $ext_if proto tcp from any to ($ext_if) port 9002  -> 10.0.10.122 port 9002
+rdr pass on $ext_if proto tcp from any to ($ext_if) port 9003  -> 10.0.10.23  port 9003
+rdr pass on $ext_if proto tcp from any to ($ext_if) port 8083  -> 10.0.10.122 port 8083
+rdr pass on $ext_if proto tcp from any to ($ext_if) port 9010  -> 10.0.10.125 port 9010
+rdr pass on $ext_if proto tcp from any to ($ext_if) port 9090  -> 10.0.10.125 port 9090
+rdr pass on $ext_if proto tcp from any to ($ext_if) port 9091  -> 10.0.10.133 port 9010
+
+#pass in  all
+#pass out all
+
+#
+# Packet Filtering
+#
+# Pass packets on external interface for foreepay VPN
+pass in on $ext_if proto {tcp,udp} from $vpn_clients to ($ext_if) port $vpn_ports
+pass out on $ext_if proto {tcp,udp} from $ext_if to $vpn_clients port $vpn_ports
+#pass in on $ext_if proto esp from $vpn_clients to ($ext_if)
+#pass out on $ext_if proto esp from $ext_if to $vpn_clients
+
+pass in  quick proto esp from $vpn_clients
+pass out quick proto esp to $vpn_clients
+pass in  quick proto ipencap from $vpn_clients
+pass out quick proto ipencap to $vpn_clients
+
+# Block all traffic
+block all
+#block drop log quick on $ext_if from <fail2ban> to any
+block in quick from <fail2ban>
+# Block invalid packets
+block in log quick on $ext_if from no-route
+block in log quick on $ext_if from urpf-failed
+
+# Incoming traffic on $ext_if
+antispoof quick for $ext_if
+block drop in on $ext_if all
+block drop on $trst_if all
+
+
+# Check src/dst of packets coming from outside
+block in quick log on $ext_if from <bruteforce>
+block in quick log on $ext_if from <blocked_hosts>
+block in quick log on $ext_if from <blocked_nets> to any
+block out quick log on $ext_if from any to <blocked_nets>
+#block in log on $ext_if to   255.255.255.255
+block in log on $ext_if to   !($ext_if)
+
+# Allow ICMP pings and traffic to open ports
+#pass inet proto icmp icmp-type echoreq
+pass in on $ext_if inet proto icmp to ($ext_if) icmp-type 8 code 0 keep state
+pass in log on $ext_if inet proto tcp  from any to 10.0.10.41 port 80 $tcp_state $sto_ext_web
+##pass in log on $ext_if inet proto tcp  from any to 10.0.10.41 port 80 $tcp_state
+# Outgoing traffic on $ext_if
+#pass out on $ext_if keep state
+pass out log on $ext_if inet proto tcp from ($ext_if) to !($ext_if) port $tcp_ports $tcp_state
+pass out log on $ext_if inet proto tcp from ($ext_if) to !($ext_if) port $high_ports $tcp_state
+pass out log on $ext_if inet proto udp from ($ext_if) to !($ext_if) port $udp_ports $udp_state
+pass out log on $ext_if inet proto icmp all $udp_state
+#pass out on $ext_if dup-to ( $int_if 10.0.10.190 ) no state
+
+# Incoming traffic on $int_if
+block return in on $int_if all
+
+# Pass packets sent to me on local interface
+#pass in on $int_if from $localnet to ($int_if) keep state
+
+# Pass packets sent to me on interface for foreepay VPN
+pass in on $trst_if proto udp from $trustnet to $vpn_clients
+pass in on $trst_if proto esp from $trustnet to $vpn_clients
+
+# Pass packets sent to me on interface for  VPN connections setnt to VPN clients
+pass in on $int_if proto {tcp, udp} from $int_if:network to $vpn_clients
+pass in on $int_if proto esp from $int_if:network to $vpn_clients
+
+
+# Filter LAN ---> Inet traffic
+pass in on $int_if proto icmp from $localnet to !($trustnet) keep state
+##### FUL INTERNET Open
+pass in on $int_if proto tcp from $localnet to any port $high_ports keep state
+#pass in on $int_if proto tcp from $localnet to <allowed_url> port $high_ports keep state
+#pass in on $int_if proto tcp from $localnet to <allowed_url2> port $high_ports keep state
+#pass in on $int_if proto tcp from $localnet to <slack_allowed_url1> port $high_ports keep state
+#pass in on $int_if proto tcp from $localnet to <slack_allowed_ur12> port $high_ports keep state
+pass in on $int_if proto tcp from $localnet to !($trustnet)  port $tcp_ports $tcp_state $sto_nat_ports
+pass in on $int_if proto udp from $localnet to !($trustnet) port $udp_ports $udp_state
+pass in on $int_if proto tcp from $localnet to $trustnet port $trustnet_ports $tcp_state
+
+# Outgoing traffic on $int_if
+pass out on $int_if all keep state
+
+
+##############################################################
+
+# Filter Trust Network ---> Inet traffic
+pass in on $trst_if proto icmp from $trustnet to any keep state
+##### FUL INTERNET Open
+pass in on $int_if proto tcp from $localnet to any port $high_ports keep state
+#pass in on $trst_if proto tcp from $trustnet to <allowed_url> port $high_ports keep state
+#pass in on $trst_if proto tcp from $trustnet to <allowed_url2> port $high_ports keep state
+pass in on $trst_if proto tcp from $trustnet to any           port $high_ports keep state
+pass in on $trst_if proto tcp from $trustnet to any           port $udp_ports $udp_state $sto_nat_ports
+
+# Accept LAN ---> My external interface
+pass in on $trst_if proto tcp from $trst_if:network to ($ext_if) $mod_state $sto_nat_ports
+pass in on $trst_if proto udp from $trst_if:network to ($ext_if) keep state $sto_nat_ports
+
+# Outgoing traffic on $trst_if
+pass out on $trst_if  to any keep state
+
+pass in log on $ext_if inet proto tcp  from any to 127.0.0.1  port 22 $tcp_state $sto_ext_ssh
+pass in log on $ext_if inet proto tcp  from any to 10.0.10.14 port 22 $tcp_state $sto_ext_ssh
+pass in     on $ext_if inet proto tcp  from any to 10.0.10.41 port 443  $syn_state
+
+# Allow SSH, but block bruteforcers
+#pass in inet proto tcp to $ext_if port ssh  \
+#flags S/SA keep state \
+#(max-src-conn 10, max-src-conn-rate 5/60, \
+#overload <bruteforce> )
